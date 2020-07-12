@@ -11,7 +11,14 @@ namespace S3DExtrusionFix
     {
         static void Main(string[] args)
         {
-            const string path = @"C:\3D\gcode\HDMI7_Uni_Lid_v24.gcode";
+            if (!args.Any())
+            {
+                Console.WriteLine("The path to the gcode file to be fixed is required.");
+                Console.ReadLine();
+                return;
+            }
+
+            var path = args[0];
 
             var lines = File.ReadAllLines(path);
 
