@@ -28,7 +28,7 @@ namespace S3DExtrusionFix
 
             int lineCount = 0;
 
-            var movements = new List<(int lineNumber, double ratio, double distance)>();
+            var movements = new List<(int lineNumber, double ratio, double distance, double previousE)>();
 
             foreach (var line in lines)
             {
@@ -58,15 +58,15 @@ namespace S3DExtrusionFix
                                 if (values.ContainsKey('E'))
                                 {
                                     var de = values['E'] - cure;
-                                    cure = values['E'];
 
                                     var dd = Math.Sqrt(dx * dx + dy * dy);
                                     if (dd != 0)
                                     {
                                         var x = de / dd;
 
-                                        movements.Add((lineCount, x, dd));
+                                        movements.Add((lineCount, x, dd, cure));
                                     }
+                                    cure = values['E'];
                                 }
                             }
                             break;
@@ -104,23 +104,18 @@ namespace S3DExtrusionFix
 
                 var tags = ParseLine(lines[o.lineNumber - 1]);
 
-                var previousTags = ParseLine(lines[o.lineNumber - 2]);
-                if (previousTags.ContainsKey('E'))
-                {
+                tags['E'] = o.previousE + suggestedExtrusion;
 
-                    tags['E'] = previousTags['E'] + suggestedExtrusion;
+                var bob = new StringBuilder();
+                bob.Append($"G{tags['G']:0} X{tags['X']:0.000} Y{tags['Y']:0.000} E{tags['E']:0.0000}");
 
-                    var bob = new StringBuilder();
-                    bob.Append($"G{tags['G']:0} X{tags['X']:0.000} Y{tags['Y']:0.000} E{tags['E']:0.0000}");
+                if (tags.ContainsKey('F'))
+                    bob.Append($" F{tags['F']:0}");
 
-                    if (tags.ContainsKey('F'))
-                        bob.Append($" F{tags['F']:0}");
+                var newLine = bob.ToString();
+                Console.WriteLine($"Changed: {newLine}");
 
-                    var newLine = bob.ToString();
-                    Console.WriteLine($"Changed: {newLine}");
-
-                    lines[o.lineNumber - 1] = newLine;
-                }
+                lines[o.lineNumber - 1] = newLine;
             });
 
             var filename = Path.GetFileNameWithoutExtension(path);
