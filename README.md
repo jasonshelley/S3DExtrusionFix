@@ -11,4 +11,4 @@ This app corrects this using the following process:
 
 # Usage
 
-S3DExtrusionFix <path>
+S3DExtrusionFix path
