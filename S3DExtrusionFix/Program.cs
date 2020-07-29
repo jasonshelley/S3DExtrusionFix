@@ -9,6 +9,14 @@ namespace S3DExtrusionFix
 {
     class Program
     {
+        const string FilamentDiameter = "filamentDiameters";
+        const string NozzleDiameter = "extruderDiameter";
+        const string LayerHeight = "layerHeight";
+        const string LineWidth = "extruderWidth";
+        const string MaxWidthPercentage = "singleExtrusionMaxPrintingWidthPercentage";
+        const string FirstLayerWidthPercentage = "firstLayerWidthPercentage";
+        const string IsParam = "isParam";
+
         static void Main(string[] args)
         {
             if (!args.Any())
@@ -24,22 +32,39 @@ namespace S3DExtrusionFix
 
             double curx = 0, cury = 0, cure = 0;
 
-            var values = new Dictionary<char, double>();
+            var values = new Dictionary<string, double>();
+            var parameters = new Dictionary<string, double>();
 
             int lineCount = 0;
 
-            var movements = new List<(int lineNumber, double ratio, double distance, double previousE)>();
+            var movements = new List<(int lineNumber, double lineWidth, double distance, double previousE)>();
+            var multiplier = 1.0;
+
+            var outlines = new List<string>();
+
+            int outliers = 0;
 
             foreach (var line in lines)
             {
                 lineCount++;
+                var outLine = line;
                 values = ParseLine(line);
-                if (values.ContainsKey('G'))
+                if (values.ContainsKey(IsParam))
                 {
-                    switch (values['G'])
+                    values.Remove(IsParam);
+                    parameters.Add(values.Keys.First(), values.Values.First());
+
+                    if (parameters.ContainsKey(MaxWidthPercentage) && parameters.ContainsKey(FirstLayerWidthPercentage))
+                    {
+                        multiplier = Math.Max(parameters[MaxWidthPercentage], parameters[FirstLayerWidthPercentage]) / 100.0;
+                    }
+                }
+                else if (values.ContainsKey("G"))
+                {
+                    switch (values["G"])
                     {
                         case 92:
-                            cure = values['E'];
+                            cure = values["E"];
                             break;
 
                         case 28:
@@ -47,76 +72,69 @@ namespace S3DExtrusionFix
                             break;
 
                         case 1:
-                            if (values.ContainsKey('X') && values.ContainsKey('Y'))
+                            var travel = 0.0;
+                            if (values.ContainsKey("X") && values.ContainsKey("Y"))
                             {
-                                var dx = values['X'] - curx;
-                                var dy = values['Y'] - cury;
+                                var dx = values["X"] - curx;
+                                var dy = values["Y"] - cury;
+                                travel = Math.Sqrt(dx * dx + dy * dy);
 
-                                curx = values['X'];
-                                cury = values['Y'];
-
-                                if (values.ContainsKey('E'))
-                                {
-                                    var de = values['E'] - cure;
-
-                                    var dd = Math.Sqrt(dx * dx + dy * dy);
-                                    if (dd != 0)
-                                    {
-                                        var x = de / dd;
-
-                                        movements.Add((lineCount, x, dd, cure));
-                                    }
-                                    cure = values['E'];
-                                }
+                                curx = values["X"];
+                                cury = values["Y"];
                             }
+                            if (values.ContainsKey("E"))
+                            {
+                                var de = values["E"] - cure;
+                                // volume extruded
+                                var extrudedVolume = de * Math.PI * Math.Pow(parameters[FilamentDiameter] / 2, 2);
+
+                                if (travel != 0)
+                                {
+                                    // for a given volume extruded, for a given distance
+                                    // we can calculate the actual line width
+                                    // width = volume / (dd * layer height)
+                                    double lineWidth = extrudedVolume / (travel * parameters[LayerHeight]);
+                                    // line width is greater than the indicated maximums
+                                    if (lineWidth > parameters[LineWidth] * multiplier)
+                                    {
+                                        // we'll set the new extrusion to achieve the configured line width
+                                        // this may be wrong as it may be a single line extrusion
+                                        // TODO: Deal with single line extrusions
+                                        var volumeToExtrude = travel * parameters[LineWidth] * parameters[LayerHeight];
+                                        var extrusionDistance = volumeToExtrude / (Math.PI * Math.Pow(parameters[FilamentDiameter] / 2, 2));
+
+                                        values["E"] = cure + extrusionDistance;
+
+                                        outLine = BuildNewLine(values);
+
+                                        outliers++;
+                                        Console.WriteLine($"({lineCount}) Indicated Line Width: {lineWidth}");
+                                    }
+                                    movements.Add((lineCount, lineWidth, travel, cure));
+                                }
+                                cure = values["E"];
+                            }
+
+
                             break;
                     }
                 }
+                outlines.Add(outLine);   
             }
 
-            var mean = movements.Average(m => m.ratio);
-            var sd = Sd(movements.Select(m => m.ratio));
+            var mean = movements.Average(m => m.lineWidth);
+            var sd = Sd(movements.Select(m => m.lineWidth));
 
-            Console.WriteLine($"Mean extrusion to travel ratio: {mean}");
+            Console.WriteLine($"Mean extrusion to travel lineWidth: {mean}");
             Console.WriteLine($"Std: {sd}");
+            Console.WriteLine($"Total outliers (including waterfall modifications): {outliers}");
 
-            if (sd < mean)
+            if (outliers == 0)
             {
                 Console.WriteLine("Clean file. No action taken.");
                 Console.ReadLine();
                 return;
             }
-
-            var oddities = movements.Where(m => m.ratio > mean + sd);
-
-            var list = oddities.ToList();
-
-            if (list.Any())
-                Console.WriteLine($"{list.Count()} outliers found:");
-
-            list.ForEach(o =>
-            {
-                Console.WriteLine($"({o.lineNumber}) Extrusion ratio: {o.ratio}");
-
-                // apply mean extrustion rate over distance
-                var suggestedExtrusion = o.distance * mean;
-                Console.WriteLine($"Current: {lines[o.lineNumber - 1]}");
-
-                var tags = ParseLine(lines[o.lineNumber - 1]);
-
-                tags['E'] = o.previousE + suggestedExtrusion;
-
-                var bob = new StringBuilder();
-                bob.Append($"G{tags['G']:0} X{tags['X']:0.000} Y{tags['Y']:0.000} E{tags['E']:0.0000}");
-
-                if (tags.ContainsKey('F'))
-                    bob.Append($" F{tags['F']:0}");
-
-                var newLine = bob.ToString();
-                Console.WriteLine($"Changed: {newLine}");
-
-                lines[o.lineNumber - 1] = newLine;
-            });
 
             var filename = Path.GetFileNameWithoutExtension(path);
             var extension = Path.GetExtension(path);
@@ -124,10 +142,22 @@ namespace S3DExtrusionFix
 
             var newFilename = $"{dir}\\{filename}.s3dfix{extension}";
 
-            File.WriteAllLines(newFilename, lines);
+            File.WriteAllLines(newFilename, outlines);
 
             Console.WriteLine($"Fixes written to: {newFilename}");
             Console.ReadLine();
+        }
+
+        private static string BuildNewLine(Dictionary<string, double> tags)
+        {
+            var bob = new StringBuilder();
+            bob.Append($"G{tags["G"]:0} X{tags["X"]:0.000} Y{tags["Y"]:0.000} E{tags["E"]:0.0000}");
+
+            if (tags.ContainsKey("F"))
+                bob.Append($" F{tags["F"]:0}");
+
+            var newLine = bob.ToString();
+            return newLine;
         }
 
         static double Sd(IEnumerable<double> values)
@@ -141,24 +171,46 @@ namespace S3DExtrusionFix
             return sd;
         }
 
-        static Dictionary<char, double> ParseLine(string line)
+        static Dictionary<string, double> ParseLine(string line)
         {
-            var isParam = new Regex(@"[A-Z][0-9\.]+");
-            var values = new Dictionary<char, double>();
-            var parts = line.Split(' ');
-            if (parts[0][0] == 'G')
+            var values = new Dictionary<string, double>();
+            if (line.StartsWith(";"))
             {
-                foreach (var part in parts)
+                line = line.Substring(2);
+                if (line.StartsWith("  "))
                 {
-                    if (isParam.IsMatch(part))
+                    line = line.Substring(2);
+                    var parts = line.Split(',');
+                    if (parts.Count() > 1)
                     {
-                        var tag = part[0];
-                        if (double.TryParse(part.Substring(1, part.Length - 1), out var v))
-                            values.Add(tag, v);
+                        var valueArray = parts[1]?.Split('|');
+                        if (double.TryParse(valueArray[0], out var x))
+                        {
+                            values.Add(IsParam, 0);
+                            values.Add(parts[0], x);
+                        }
                     }
                 }
             }
+            else
+            {
 
+                var isParam = new Regex(@"[A-Z][0-9\.]+");
+                var parts = line.Split(' ');
+                if (parts[0][0] == 'G')
+                {
+                    foreach (var part in parts)
+                    {
+                        if (isParam.IsMatch(part))
+                        {
+                            var tag = part[0];
+                            if (double.TryParse(part.Substring(1, part.Length - 1), out var v))
+                                values.Add(new String(tag, 1), v);
+                        }
+                    }
+                }
+
+            }
             return values;
         }
     }
