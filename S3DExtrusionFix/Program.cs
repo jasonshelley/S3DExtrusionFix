@@ -15,6 +15,7 @@ namespace S3DExtrusionFix
         const string LineWidth = "extruderWidth";
         const string MaxWidthPercentage = "singleExtrusionMaxPrintingWidthPercentage";
         const string FirstLayerWidthPercentage = "firstLayerWidthPercentage";
+        const string ExtrusionMultiplier = "extrusionMultiplier";
         const string IsParam = "isParam";
 
         static void Main(string[] args)
@@ -125,7 +126,8 @@ namespace S3DExtrusionFix
             var mean = movements.Average(m => m.lineWidth);
             var sd = Sd(movements.Select(m => m.lineWidth));
 
-            Console.WriteLine($"Mean extrusion to travel lineWidth: {mean}");
+            Console.WriteLine($"Mean lineWidth: {mean}");
+            Console.WriteLine($"Configured lineWidth (including extrusion multiplier): {parameters[LineWidth] * parameters[ExtrusionMultiplier]}");
             Console.WriteLine($"Std: {sd}");
             Console.WriteLine($"Total outliers (including waterfall modifications): {outliers}");
 
