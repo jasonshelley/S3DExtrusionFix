@@ -101,7 +101,7 @@ namespace S3DExtrusionFix
                                         // we'll set the new extrusion to achieve the configured line width
                                         // this may be wrong as it may be a single line extrusion
                                         // TODO: Deal with single line extrusions
-                                        var volumeToExtrude = travel * parameters[LineWidth] * parameters[LayerHeight];
+                                        var volumeToExtrude = travel * parameters[LineWidth] * parameters[LayerHeight] * parameters[ExtrusionMultiplier];
                                         var extrusionDistance = volumeToExtrude / (Math.PI * Math.Pow(parameters[FilamentDiameter] / 2, 2));
 
                                         values["E"] = cure + extrusionDistance;
