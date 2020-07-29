@@ -37,6 +37,7 @@ namespace S3DExtrusionFix
             var parameters = new Dictionary<string, double>();
 
             int lineCount = 0;
+            int previousLineNumer = 0;
 
             var movements = new List<(int lineNumber, double lineWidth, double distance, double previousE)>();
             var multiplier = 1.0;
@@ -109,7 +110,8 @@ namespace S3DExtrusionFix
                                         outLine = BuildNewLine(values);
 
                                         outliers++;
-                                        Console.WriteLine($"({lineCount}) Indicated Line Width: {lineWidth}");
+                                        Console.WriteLine($"({(lineCount == previousLineNumer + 1 ? "+" : "")}{lineCount}) Indicated Line Width: {lineWidth}");
+                                        previousLineNumer = lineCount;
                                     }
                                     movements.Add((lineCount, lineWidth, travel, cure));
                                 }
