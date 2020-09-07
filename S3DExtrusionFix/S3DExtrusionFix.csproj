@@ -40,6 +40,13 @@
     <Reference Include="System.Data" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Gcode\GCode.cs" />
+    <Compile Include="Gcode\GCodeLine.cs" />
+    <Compile Include="Gcode\GcodeUtils.cs" />
+    <Compile Include="Gcode\GCodeLineType.cs" />
+    <Compile Include="Gcode\S3DFeatureComment.cs" />
+    <Compile Include="Gcode\S3DSetting.cs" />
+    <Compile Include="Gcode\S3DSettingType.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
