@@ -28,6 +28,8 @@ namespace S3DExtrusionFix
         static string _curFeature;
         static Dictionary<string, double> _parameters;
 
+        static bool _useRelativeExtrusion = true;
+
 
         static void Main(string[] args)
         {
@@ -45,8 +47,6 @@ namespace S3DExtrusionFix
             var logStream = File.Open(logPath, FileMode.Append, FileAccess.Write);
             _log = new StreamWriter(logStream);
             _log.AutoFlush = true;
-
-            WriteLine($"Processing");
 
             if (Directory.Exists(path))
             {
@@ -75,7 +75,7 @@ namespace S3DExtrusionFix
             var gcodeLines = GcodeUtils.ParseLines(lines);
 
 
-            var movements = new List<(int lineNumber, double lineWidth, double distance, double previousE)>();
+//            var movements = new List<(int lineNumber, double lineWidth, double distance, double previousE)>();
             var multiplier = 1.0;
 
             var maxWidthPercentage = gcodeLines.FirstOrDefault(l => l.LineType == GCodeLineType.S3DSetting && l.S3DSetting.Key == MaxWidthPercentage);
@@ -96,7 +96,7 @@ namespace S3DExtrusionFix
 
             var outlines = new List<string>();
 
-            WriteLine(path);
+            WriteLine($"PROCESSING: {path}");
 
             int outliers = 0;
 
@@ -155,44 +155,55 @@ namespace S3DExtrusionFix
                             }
                             if (values.ContainsKey("E"))
                             {
-                                var de = values["E"] - cure;
+//                                var de = values["E"] - cure;
+                                var de = values["E"];
+                                if (!_useRelativeExtrusion)
+                                    de -= cure;
+
                                 // volume extruded
                                 var extrudedVolume = de * Math.PI * Math.Pow(_parameters[FilamentDiameter] / 2, 2);
 
                                 if (travel != 0)
                                 {
-                                    // for a given volume extruded, for a given distance
-                                    // we can calculate the actual line width
-                                    // width = volume / (dd * layer height)
-                                    double lineWidth = extrudedVolume / (travel * curlayer);
-                                    // line width is greater than the indicated maximums
-                                    if (lineWidth > _parameters[LineWidth] * multiplier)
+                                    //// for a given volume extruded, for a given distance
+                                    //// we can calculate the actual line width
+                                    //// width = volume / (dd * layer height)
+                                    //double lineWidth = extrudedVolume / (travel * curlayer);
+                                    //// line width is greater than the indicated maximums
+                                    //if (lineWidth > _parameters[LineWidth] * multiplier)
+                                    //{
+                                    //    // we'll set the new extrusion to achieve the configured line width
+                                    //    // this may be wrong as it may be a single line extrusion
+                                    //    // TODO: Deal with single line extrusions
+                                    //    var volumeToExtrude = travel * _parameters[LineWidth] * curlayer * _parameters[ExtrusionMultiplier] * multiplier;
+                                    //    var extrusionDistance = volumeToExtrude / (Math.PI * Math.Pow(_parameters[FilamentDiameter] / 2, 2));
+
+                                    //    var originalE = values["E"];
+
+                                    //    values["E"] = extrusionDistance;
+                                    //    if (!_useRelativeExtrusion)
+                                    //        values["E"] += cure;
+
+                                    //    outLine = BuildNewLine(values);
+
+                                    //    outliers++;
+                                    //    if (previousLineNumber != 0)
+                                    //        WriteLine();
+                                    //    Write($"({(lineCount == previousLineNumber + 1 ? "+" : "")}{lineCount}) Line Width: {lineWidth}, Tavel: {travel}, Extrusion: {originalE} => {values["E"]}");
+
+                                    //    previousLineNumber = lineCount;
+                                    //}
+                                    //movements.Add((lineCount, lineWidth, travel, cure));
+
+                                    var crossSectionalArea = extrudedVolume / travel;
+                                    if (crossSectionalArea > 0.64)
                                     {
-                                        // we'll set the new extrusion to achieve the configured line width
-                                        // this may be wrong as it may be a single line extrusion
-                                        // TODO: Deal with single line extrusions
-                                        var volumeToExtrude = travel * _parameters[LineWidth] * curlayer * _parameters[ExtrusionMultiplier] * multiplier;
-                                        var extrusionDistance = volumeToExtrude / (Math.PI * Math.Pow(_parameters[FilamentDiameter] / 2, 2));
-
-                                        values["E"] = cure + extrusionDistance;
-
+                                        var correction = 0.639 / crossSectionalArea;    // 0.64 - margin of error
+                                        values["E"] = de * correction;
+                                        WriteLine($"ERROR Line: {lineCount} Correction Factor: {correction} {de}mm -> {values["E"]:0.####}mm");
                                         outLine = BuildNewLine(values);
-
-                                        if (lineCount == previousLineNumber + 1)
-                                        {
-                                            Write(".");
-                                        }
-                                        else
-                                        {
-                                            outliers++;
-                                            if (previousLineNumber != 0)
-                                                WriteLine();
-                                            Write($"({(lineCount == previousLineNumber + 1 ? "+" : "")}{lineCount}) Line Width: {lineWidth} Cross Sectional Area:{_parameters[LayerHeight] * lineWidth}");
-                                        }
-
-                                        previousLineNumber = lineCount;
+                                        outliers++;
                                     }
-                                    movements.Add((lineCount, lineWidth, travel, cure));
                                 }
                                 cure = values["E"];
                             }
@@ -204,29 +215,22 @@ namespace S3DExtrusionFix
                 outlines.Add(outLine);
             }
 
-            var mean = movements.Average(m => m.lineWidth);
-            var sd = Sd(movements.Select(m => m.lineWidth));
+            WriteLine($"COMPLETE with {outliers} correction(s) made.");
 
-            if (outliers == 0)
+            if (outliers > 0)
             {
-                WriteLine("Clean file. No action taken.");
-                return;
+
+                var filename = Path.GetFileNameWithoutExtension(path);
+                var extension = Path.GetExtension(path);
+
+                var newFilename = $"{dir}\\{filename}.s3dfix{extension}";
+
+                File.WriteAllLines(newFilename, outlines);
+
+                WriteLine($"Fixes written to: {newFilename}");
             }
 
-            WriteLine();
-            WriteLine($"Configured line width (including extrusion multiplier): {_parameters[LineWidth] * _parameters[ExtrusionMultiplier]}");
-            WriteLine($"Mean line width: {mean}");
-            WriteLine($"Std: {sd}");
-            WriteLine($"Total outliers: {outliers}");
-
-            var filename = Path.GetFileNameWithoutExtension(path);
-            var extension = Path.GetExtension(path);
-
-            var newFilename = $"{dir}\\{filename}.s3dfix{extension}";
-
-            File.WriteAllLines(newFilename, outlines);
-
-            WriteLine($"Fixes written to: {newFilename}");
+            WriteLine("--------");
         }
 
         private static void Write(string msg)
@@ -236,16 +240,10 @@ namespace S3DExtrusionFix
         }
         private static void WriteLine(string msg = null)
         {
-            if (string.IsNullOrEmpty(msg))
-            {
-                _log.WriteLine();
-                Console.WriteLine();
-            }
-            else
-            {
-                _log.WriteLine($"{DateTime.Now} - {msg}");
-                Console.WriteLine(msg);
-            }
+            msg = $"[{DateTime.Now}] {msg}";
+
+            _log.WriteLine(msg);
+            Console.WriteLine(msg);
         }
 
         private static string BuildNewLine(Dictionary<string, double> tags)
