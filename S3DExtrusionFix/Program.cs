@@ -200,7 +200,7 @@ namespace S3DExtrusionFix
                                     {
                                         var correction = 0.639 / crossSectionalArea;    // 0.64 - margin of error
                                         values["E"] = de * correction;
-                                        WriteLine($"ERROR Line: {lineCount} Correction Factor: {correction} {de}mm -> {values["E"]:0.####}mm");
+                                        WriteLine($"ERROR Line: {lineCount} Cross Sectional Area: {crossSectionalArea} Correction: {de}mm -> {values["E"]:0.####}mm");
                                         outLine = BuildNewLine(values);
                                         outliers++;
                                     }
